@@ -44,6 +44,7 @@ namespace MultiSaper
         const int SEND_BOARD_DATA = 81;
         const int SEND_SCORE_DATA = 82;
         const int SEND_PLAYER_DATA = 83;
+        const int SEND_WRONG_NAME = 90;
 
         int _sizeBoard = 262144;
         int _sizeX = 512;
@@ -438,9 +439,30 @@ namespace MultiSaper
             {
                 if (_cmdPending == 0)
                 {
-                    _cmdPending = _rxBuf[0];
-                    bytesNeeded = (int)_rxBuf[1] | (int)_rxBuf[2] << 8 | (int)_rxBuf[3] << 16;
-                    DebugWriteSafe("Bytes needed:" + bytesNeeded.ToString() + " cmd: " + _cmdPending.ToString());
+
+                    if (_rxBuf[0] == SEND_WRONG_NAME)
+                    {
+                        labelInfo.Invoke((MethodInvoker)delegate
+                        {
+                            labelInfo.Text = "Press <Play> to join the game";
+                        });
+                        buttonLogin.Invoke((MethodInvoker)delegate
+                        {
+                            buttonLogin.Enabled = true;
+                        });
+
+                        DebugWriteSafe("Wrong name entered");
+                        MessageBox.Show("Ten nick jest już zajęty");
+
+                        DisconnectServer();
+                        _gameState = GAME_STATE_IDLE;
+                    }
+                    else
+                    {
+                        _cmdPending = _rxBuf[0];
+                        bytesNeeded = (int)_rxBuf[1] | (int)_rxBuf[2] << 8 | (int)_rxBuf[3] << 16;
+                        DebugWriteSafe("Bytes needed:" + bytesNeeded.ToString() + " cmd: " + _cmdPending.ToString());
+                    }
                 }
                 else
                 {
