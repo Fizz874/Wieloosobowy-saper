@@ -2,7 +2,9 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <cstring>
 #include "Player.h"
+
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -21,7 +23,7 @@
 #define BOARD_SIZEX 512
 #define BOARD_SIZEY 512
 #define BOARD_SIZE 262144 //512x512
-#define BOMB_DENSITY 10 //statistically one in BOMB_DENSITY is a bomb
+#define BOMB_DENSITY 4 //statistically one in BOMB_DENSITY is a bomb
 //0 - 8 BLANK_COVERED adjacent to bombs
 #define BLANK_COVERED_END 9
 //10 - 18 BLANK_UNCOVERED adjacent to bombs
@@ -49,12 +51,13 @@
 #define SEND_BOARD_DATA 81
 #define SEND_SCORE_DATA 82
 #define SEND_PLAYER_DATA 83
-#define SEND_PLAYER_DELETE_DATA 84
+#define SEND_WRONG_NAME 90
 
 typedef unsigned char byte;
 
 int next_player_id = 11;
 int unnamed_players = 0;
+int covered_fields = BOARD_SIZE;
 int board[BOARD_SIZE];
 
 int LSock;
@@ -119,6 +122,37 @@ void DisconnectAllPlayers()
 }
 
 
+void SendWithPoll(Player* pl, int pos){
+
+	std::string msg(send_buffer, pos);
+	pl->bSend.push_back(msg);
+
+	if(pl->bSend.size() <= 1){
+		int PSock = pl->fd;
+		for(auto iter = SocketsPollVect.begin(); iter != SocketsPollVect.end(); ++iter) {
+			if(iter->fd == PSock){
+				iter->events |= POLLOUT;
+			}
+		}
+	}
+
+}
+
+
+
+bool IsNameAvailable(std::string name){
+	for(auto iter = PlayersVect.begin(); iter != PlayersVect.end(); ++iter){
+		Player* pl = (*iter);
+		if (pl->id != 0){
+			if(pl->name == name){
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+
 void OnPlayer(int desc){
 	Player* pl = new Player();
 	pl->fd = desc;
@@ -129,17 +163,61 @@ void OnPlayer(int desc){
 //dodaje nowego gracza do NewPlayersVect
 void OnNewPlayer(Player* pl, std::string name)
 {
-	pl->id = next_player_id++;
-	pl->name = name;
-	NewPlayersVect.push_back(pl);
-	unnamed_players--;
+	if(IsNameAvailable(name)){
+		pl->id = next_player_id++;
+		pl->name = name;
+		NewPlayersVect.push_back(pl);
+		unnamed_players--;
+	} else {
+		send_buffer[0] = SEND_WRONG_NAME;
+		SendWithPoll(pl,1);
+	}
+}
+
+
+void ChainedUncover(int field, int id){
+	
+	if(board[field] == 0){
+		board[field] = id * 100 + 10; // add players id
+		BoardUpdateVect.push_back(field);
+
+		//sprawdzaj sąsiadów
+		int fieldX = field % BOARD_SIZEX;
+		int fieldY = field / BOARD_SIZEY;
+		
+		int row[8] = {-1,1,0,0,-1,-1,1,1};
+		int col[8] = {0,0,-1,1,-1,1,-1,1};
+
+		for(int i =0; i< 8; i++){
+			int newX = fieldX+col[i];
+			int newY = fieldY+row[i];
+
+			if((newX >= 0 && newX < BOARD_SIZEX) 
+				&& (newY >= 0 && newY < BOARD_SIZEY)){
+				int newField = newX + newY*BOARD_SIZEY;
+				if(board[newField] < BLANK_COVERED_END) ChainedUncover(newField, id);
+			
+			}
+
+		}
+
+	} else if (board[field] < BLANK_COVERED_END){
+		//odkryj ale nie idź dalej
+		board[field] = id * 100 + board[field] + 10; // add players id
+		BoardUpdateVect.push_back(field);
+		return;
+
+	} 
+	return;
 }
 
 //obsługuje nadesłane kliknięcia graczy, zmienione pola dodaje do BoardUpdateVect, wyniki do ScoresUpdateVect
 void OnPlayersClick(Player* pl, int num, int cmd)
 {
 	int val = 0;
-	if (board[num] < BLANK_COVERED_END)
+	if(board[num] == 0 && cmd == SEND_LEFTCLICK){
+		val = 3;
+	} else if (board[num] < BLANK_COVERED_END)
 	{
 		if (cmd == SEND_LEFTCLICK)
 		{
@@ -167,14 +245,21 @@ void OnPlayersClick(Player* pl, int num, int cmd)
 	}
 	if (val != 0)
 	{
-		board[num] = pl->id * 100 + board[num]; // add players id
-		BoardUpdateVect.push_back(num);
+		if(board[num] == 0){
+			ChainedUncover(num, pl->id);
+		} else {
+			board[num] = pl->id * 100 + board[num]; // add players id
+			BoardUpdateVect.push_back(num);
+		}
 		pl->score += val;
 		if (pl->score < 0) pl->score = 0;
 		ScoresUpdateVect.push_back(pl);
 	}
 
 }
+
+
+
 
 
 //obsługa komunikacji TCP IP 
@@ -444,21 +529,6 @@ bool PollSockets()
 
 
 
-void SendWithPoll(Player* pl, int pos){
-
-	std::string msg(send_buffer, pos);
-	pl->bSend.push_back(msg);
-
-	if(pl->bSend.size() <= 1){
-		int PSock = pl->fd;
-		for(auto iter = SocketsPollVect.begin(); iter != SocketsPollVect.end(); ++iter) {
-			if(iter->fd == PSock){
-				iter->events |= POLLOUT;
-			}
-		}
-	}
-
-}
 
 
 //po zalogowaniu odsyła graczowi przyznany ID
@@ -536,8 +606,7 @@ void SendNewPlayerData(Player* pl)
 		Player* plex = (*iter);
 		if (plex == pl) continue;//dont send to itself
 		if (plex->id == 0)continue;
-
-		SendWithPoll(plex, pos);
+		SendWithPoll(plex, 42);
 
 	}
 	
@@ -670,6 +739,7 @@ void SendBoardUpdate()
 
 	while (!BoardUpdateVect.empty())
 	{
+		covered_fields--;
 		int num = BoardUpdateVect.back();
 		send_buffer[pos++] = (byte)(num);
 		send_buffer[pos++] = (byte)(num >> 8);
@@ -709,6 +779,29 @@ void SendBoardUpdate()
 	}
 }
 
+
+void UpdateAdjacentBombs(int field){
+	int fieldX = field % BOARD_SIZEX;
+	int fieldY = field / BOARD_SIZEY;
+	
+	int row[8] = {-1,1,0,0,-1,-1,1,1};
+	int col[8] = {0,0,-1,1,-1,1,-1,1};
+
+	for(int i =0; i< 8; i++){
+		int newX = fieldX+col[i];
+		int newY = fieldY+row[i];
+
+		if((newX >= 0 && newX < BOARD_SIZEX) 
+			&& (newY >= 0 && newY < BOARD_SIZEY)){
+			int newField = newX + newY*BOARD_SIZEY;
+			if(board[newField] != BOMB_COVERED) board[newField]++;
+		
+		}
+	}
+}
+
+
+
 //obsługuje aktualizacje stanu gry co 1s
 void OneSecondTimer()
 {
@@ -725,7 +818,7 @@ void OneSecondTimer()
 	else if (gameState == GAME_STATE_GAME)
 	{
 		gameTimer--;
-		if (gameTimer < 0)
+		if (gameTimer < 0 or covered_fields <= 0)
 		{
 			gameState = GAME_STATE_OVER;
 			gameTimer = RESTART_TIMEOUT;
@@ -756,19 +849,25 @@ void OneTickTimer()
 			gameState = GAME_STATE_WAITING;
 			gameTimer = WAITING_TIMEOUT;
 			//prepare the board
+			covered_fields=BOARD_SIZE;
+			memset(board, 0, sizeof(board));
 			srand(time(0));
 			for (int i = 0; i < BOARD_SIZE; i++)
 			{
 				int liczba_losowa = rand() % BOMB_DENSITY;
-				if (liczba_losowa == 1) board[i] = BOMB_COVERED;
-				else board[i] = 0;
-				
+				if (liczba_losowa == 1) {
+
+					board[i] = BOMB_COVERED;
+					UpdateAdjacentBombs(i);
+				}
+								
 			}	
+
 
 			std::cout << "Game state: GAME_STATE_WAITING\r\n";
 		}
 	}	
-	else if (PlayersVect.size() == 0)//no players connected
+	else if (PlayersVect.size()-unnamed_players == 0)//no players connected
 	{
 		gameState = GAME_STATE_IDLE;
 		std::cout << "Game state: GAME_STATE_IDLE\r\n";
