@@ -30,9 +30,9 @@
         {
             this.components = new System.ComponentModel.Container();
             this.splitContainer1 = new System.Windows.Forms.SplitContainer();
+            this.pictureBoxBoard = new System.Windows.Forms.PictureBox();
             this.vScrollBar1 = new System.Windows.Forms.VScrollBar();
             this.hScrollBar1 = new System.Windows.Forms.HScrollBar();
-            this.pictureBoxBoard = new System.Windows.Forms.PictureBox();
             this.splitContainer2 = new System.Windows.Forms.SplitContainer();
             this.listView1 = new System.Windows.Forms.ListView();
             this.columnHeader1 = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
@@ -40,11 +40,13 @@
             this.label2 = new System.Windows.Forms.Label();
             this.textBoxTCPIPClient = new System.Windows.Forms.TextBox();
             this.groupBox1 = new System.Windows.Forms.GroupBox();
+            this.textBox1 = new System.Windows.Forms.TextBox();
+            this.textBoxPort = new System.Windows.Forms.TextBox();
+            this.label3 = new System.Windows.Forms.Label();
             this.textBoxLognname = new System.Windows.Forms.TextBox();
             this.labelInfo = new System.Windows.Forms.Label();
             this.label1 = new System.Windows.Forms.Label();
             this.textBoxIPAddress = new System.Windows.Forms.TextBox();
-            this.labelDebug = new System.Windows.Forms.Label();
             this.buttonLogin = new System.Windows.Forms.Button();
             this.labelScore = new System.Windows.Forms.Label();
             this.label4 = new System.Windows.Forms.Label();
@@ -70,41 +72,23 @@
             // 
             // splitContainer1.Panel1
             // 
+            this.splitContainer1.Panel1.Controls.Add(this.pictureBoxBoard);
             this.splitContainer1.Panel1.Controls.Add(this.vScrollBar1);
             this.splitContainer1.Panel1.Controls.Add(this.hScrollBar1);
-            this.splitContainer1.Panel1.Controls.Add(this.pictureBoxBoard);
             // 
             // splitContainer1.Panel2
             // 
             this.splitContainer1.Panel2.Controls.Add(this.splitContainer2);
-            this.splitContainer1.Size = new System.Drawing.Size(1208, 640);
-            this.splitContainer1.SplitterDistance = 957;
+            this.splitContainer1.Size = new System.Drawing.Size(1208, 721);
+            this.splitContainer1.SplitterDistance = 956;
             this.splitContainer1.TabIndex = 0;
-            // 
-            // vScrollBar1
-            // 
-            this.vScrollBar1.Dock = System.Windows.Forms.DockStyle.Right;
-            this.vScrollBar1.Location = new System.Drawing.Point(940, 0);
-            this.vScrollBar1.Name = "vScrollBar1";
-            this.vScrollBar1.Size = new System.Drawing.Size(17, 623);
-            this.vScrollBar1.TabIndex = 2;
-            this.vScrollBar1.Scroll += new System.Windows.Forms.ScrollEventHandler(this.vScrollBar1_Scroll);
-            // 
-            // hScrollBar1
-            // 
-            this.hScrollBar1.Dock = System.Windows.Forms.DockStyle.Bottom;
-            this.hScrollBar1.Location = new System.Drawing.Point(0, 623);
-            this.hScrollBar1.Name = "hScrollBar1";
-            this.hScrollBar1.Size = new System.Drawing.Size(957, 17);
-            this.hScrollBar1.TabIndex = 1;
-            this.hScrollBar1.Scroll += new System.Windows.Forms.ScrollEventHandler(this.hScrollBar1_Scroll);
             // 
             // pictureBoxBoard
             // 
             this.pictureBoxBoard.Dock = System.Windows.Forms.DockStyle.Fill;
             this.pictureBoxBoard.Location = new System.Drawing.Point(0, 0);
             this.pictureBoxBoard.Name = "pictureBoxBoard";
-            this.pictureBoxBoard.Size = new System.Drawing.Size(957, 640);
+            this.pictureBoxBoard.Size = new System.Drawing.Size(939, 704);
             this.pictureBoxBoard.TabIndex = 0;
             this.pictureBoxBoard.TabStop = false;
             this.pictureBoxBoard.Paint += new System.Windows.Forms.PaintEventHandler(this.pictureBoxBoard_Paint);
@@ -112,6 +96,24 @@
             this.pictureBoxBoard.MouseDown += new System.Windows.Forms.MouseEventHandler(this.pictureBoxBoard_MouseDown);
             this.pictureBoxBoard.MouseMove += new System.Windows.Forms.MouseEventHandler(this.pictureBoxBoard_MouseMove);
             this.pictureBoxBoard.MouseUp += new System.Windows.Forms.MouseEventHandler(this.pictureBoxBoard_MouseUp);
+            // 
+            // vScrollBar1
+            // 
+            this.vScrollBar1.Dock = System.Windows.Forms.DockStyle.Right;
+            this.vScrollBar1.Location = new System.Drawing.Point(939, 0);
+            this.vScrollBar1.Name = "vScrollBar1";
+            this.vScrollBar1.Size = new System.Drawing.Size(17, 704);
+            this.vScrollBar1.TabIndex = 2;
+            this.vScrollBar1.Scroll += new System.Windows.Forms.ScrollEventHandler(this.vScrollBar1_Scroll);
+            // 
+            // hScrollBar1
+            // 
+            this.hScrollBar1.Dock = System.Windows.Forms.DockStyle.Bottom;
+            this.hScrollBar1.Location = new System.Drawing.Point(0, 704);
+            this.hScrollBar1.Name = "hScrollBar1";
+            this.hScrollBar1.Size = new System.Drawing.Size(956, 17);
+            this.hScrollBar1.TabIndex = 1;
+            this.hScrollBar1.Scroll += new System.Windows.Forms.ScrollEventHandler(this.hScrollBar1_Scroll);
             // 
             // splitContainer2
             // 
@@ -129,8 +131,8 @@
             // 
             this.splitContainer2.Panel2.Controls.Add(this.textBoxTCPIPClient);
             this.splitContainer2.Panel2.Controls.Add(this.groupBox1);
-            this.splitContainer2.Size = new System.Drawing.Size(247, 640);
-            this.splitContainer2.SplitterDistance = 263;
+            this.splitContainer2.Size = new System.Drawing.Size(248, 721);
+            this.splitContainer2.SplitterDistance = 295;
             this.splitContainer2.TabIndex = 0;
             // 
             // listView1
@@ -142,7 +144,7 @@
             this.listView1.HideSelection = false;
             this.listView1.Location = new System.Drawing.Point(0, 16);
             this.listView1.Name = "listView1";
-            this.listView1.Size = new System.Drawing.Size(247, 247);
+            this.listView1.Size = new System.Drawing.Size(248, 279);
             this.listView1.TabIndex = 1;
             this.listView1.UseCompatibleStateImageBehavior = false;
             this.listView1.View = System.Windows.Forms.View.Details;
@@ -170,33 +172,64 @@
             // textBoxTCPIPClient
             // 
             this.textBoxTCPIPClient.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.textBoxTCPIPClient.Location = new System.Drawing.Point(0, 203);
+            this.textBoxTCPIPClient.Location = new System.Drawing.Point(0, 282);
             this.textBoxTCPIPClient.Multiline = true;
             this.textBoxTCPIPClient.Name = "textBoxTCPIPClient";
             this.textBoxTCPIPClient.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.textBoxTCPIPClient.Size = new System.Drawing.Size(247, 170);
+            this.textBoxTCPIPClient.Size = new System.Drawing.Size(248, 140);
             this.textBoxTCPIPClient.TabIndex = 5;
+            this.textBoxTCPIPClient.Visible = false;
             // 
             // groupBox1
             // 
+            this.groupBox1.Controls.Add(this.textBox1);
+            this.groupBox1.Controls.Add(this.textBoxPort);
+            this.groupBox1.Controls.Add(this.label3);
             this.groupBox1.Controls.Add(this.textBoxLognname);
             this.groupBox1.Controls.Add(this.labelInfo);
             this.groupBox1.Controls.Add(this.label1);
             this.groupBox1.Controls.Add(this.textBoxIPAddress);
-            this.groupBox1.Controls.Add(this.labelDebug);
             this.groupBox1.Controls.Add(this.buttonLogin);
             this.groupBox1.Controls.Add(this.labelScore);
             this.groupBox1.Controls.Add(this.label4);
             this.groupBox1.Dock = System.Windows.Forms.DockStyle.Top;
             this.groupBox1.Location = new System.Drawing.Point(0, 0);
             this.groupBox1.Name = "groupBox1";
-            this.groupBox1.Size = new System.Drawing.Size(247, 203);
+            this.groupBox1.Size = new System.Drawing.Size(248, 282);
             this.groupBox1.TabIndex = 9;
             this.groupBox1.TabStop = false;
             // 
+            // textBox1
+            // 
+            this.textBox1.BackColor = System.Drawing.SystemColors.Control;
+            this.textBox1.Enabled = false;
+            this.textBox1.Font = new System.Drawing.Font("Microsoft Sans Serif", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(238)));
+            this.textBox1.Location = new System.Drawing.Point(6, 215);
+            this.textBox1.Multiline = true;
+            this.textBox1.Name = "textBox1";
+            this.textBox1.Size = new System.Drawing.Size(225, 61);
+            this.textBox1.TabIndex = 11;
+            this.textBox1.Text = "How to play:\r\nLeft-click:      Uncover\r\nRight-click:   Flag";
+            // 
+            // textBoxPort
+            // 
+            this.textBoxPort.Location = new System.Drawing.Point(3, 64);
+            this.textBoxPort.Name = "textBoxPort";
+            this.textBoxPort.Size = new System.Drawing.Size(229, 20);
+            this.textBoxPort.TabIndex = 10;
+            // 
+            // label3
+            // 
+            this.label3.AutoSize = true;
+            this.label3.Location = new System.Drawing.Point(3, 48);
+            this.label3.Name = "label3";
+            this.label3.Size = new System.Drawing.Size(26, 13);
+            this.label3.TabIndex = 9;
+            this.label3.Text = "Port";
+            // 
             // textBoxLognname
             // 
-            this.textBoxLognname.Location = new System.Drawing.Point(2, 65);
+            this.textBoxLognname.Location = new System.Drawing.Point(2, 103);
             this.textBoxLognname.MaxLength = 31;
             this.textBoxLognname.Name = "textBoxLognname";
             this.textBoxLognname.Size = new System.Drawing.Size(229, 20);
@@ -206,7 +239,7 @@
             // 
             this.labelInfo.Cursor = System.Windows.Forms.Cursors.Arrow;
             this.labelInfo.Font = new System.Drawing.Font("Microsoft Sans Serif", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(238)));
-            this.labelInfo.Location = new System.Drawing.Point(2, 149);
+            this.labelInfo.Location = new System.Drawing.Point(2, 187);
             this.labelInfo.Name = "labelInfo";
             this.labelInfo.Size = new System.Drawing.Size(229, 20);
             this.labelInfo.TabIndex = 8;
@@ -216,7 +249,7 @@
             // label1
             // 
             this.label1.AutoSize = true;
-            this.label1.Location = new System.Drawing.Point(2, 48);
+            this.label1.Location = new System.Drawing.Point(2, 86);
             this.label1.Name = "label1";
             this.label1.Size = new System.Drawing.Size(86, 13);
             this.label1.TabIndex = 0;
@@ -229,18 +262,9 @@
             this.textBoxIPAddress.Size = new System.Drawing.Size(229, 20);
             this.textBoxIPAddress.TabIndex = 7;
             // 
-            // labelDebug
-            // 
-            this.labelDebug.AutoSize = true;
-            this.labelDebug.Location = new System.Drawing.Point(2, 170);
-            this.labelDebug.Name = "labelDebug";
-            this.labelDebug.Size = new System.Drawing.Size(61, 13);
-            this.labelDebug.TabIndex = 4;
-            this.labelDebug.Text = "labelDebug";
-            // 
             // buttonLogin
             // 
-            this.buttonLogin.Location = new System.Drawing.Point(2, 92);
+            this.buttonLogin.Location = new System.Drawing.Point(2, 130);
             this.buttonLogin.Name = "buttonLogin";
             this.buttonLogin.Size = new System.Drawing.Size(229, 23);
             this.buttonLogin.TabIndex = 2;
@@ -251,7 +275,7 @@
             // labelScore
             // 
             this.labelScore.Font = new System.Drawing.Font("Microsoft Sans Serif", 12F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(238)));
-            this.labelScore.Location = new System.Drawing.Point(2, 127);
+            this.labelScore.Location = new System.Drawing.Point(2, 165);
             this.labelScore.Name = "labelScore";
             this.labelScore.Size = new System.Drawing.Size(229, 20);
             this.labelScore.TabIndex = 3;
@@ -267,16 +291,23 @@
             this.label4.TabIndex = 6;
             this.label4.Text = "Server IP";
             // 
+            // timer1
+            // 
+            this.timer1.Enabled = true;
+            this.timer1.Interval = 500;
+            this.timer1.Tick += new System.EventHandler(this.timer1_Tick);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1208, 640);
+            this.ClientSize = new System.Drawing.Size(1208, 721);
             this.Controls.Add(this.splitContainer1);
             this.Name = "Form1";
             this.Text = "Form1";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Form1_FormClosing);
             this.Load += new System.EventHandler(this.Form1_Load);
+            this.SizeChanged += new System.EventHandler(this.Form1_SizeChanged);
             this.splitContainer1.Panel1.ResumeLayout(false);
             this.splitContainer1.Panel2.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.splitContainer1)).EndInit();
@@ -307,7 +338,6 @@
         private System.Windows.Forms.TextBox textBoxLognname;
         private System.Windows.Forms.ColumnHeader columnHeader1;
         private System.Windows.Forms.ColumnHeader columnHeader2;
-        private System.Windows.Forms.Label labelDebug;
         private System.Windows.Forms.VScrollBar vScrollBar1;
         private System.Windows.Forms.HScrollBar hScrollBar1;
         private System.Windows.Forms.TextBox textBoxTCPIPClient;
@@ -316,6 +346,9 @@
         private System.Windows.Forms.Label label4;
         private System.Windows.Forms.Label labelInfo;
         private System.Windows.Forms.GroupBox groupBox1;
+        private System.Windows.Forms.TextBox textBox1;
+        private System.Windows.Forms.TextBox textBoxPort;
+        private System.Windows.Forms.Label label3;
     }
 }
 

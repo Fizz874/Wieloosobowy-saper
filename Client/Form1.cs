@@ -16,6 +16,7 @@ using System.Net.Sockets;
 using System.IO;
 using System.Runtime.InteropServices.ComTypes;
 using System.Security.Cryptography;
+//using System.Timers;
 
 namespace MultiSaper
 {
@@ -46,19 +47,29 @@ namespace MultiSaper
         const int SEND_PLAYER_DATA = 83;
         const int SEND_WRONG_NAME = 90;
 
-        int _sizeBoard = 262144;
-        int _sizeX = 512;
-        int _sizeY = 512;
+        int _sizeBoard;
+        int _sizeX;
+        int _sizeY;
+        int[] _board = null;
+        int _board_edge;
+
+
         int _offsetX = 0; //w polach
         int _offsetY = 0; //w polach
         int _rozmiar_pola = 24;
         int _pasek_naglowka = 10;
-        int[] _board = new int[262144];
+        
         int _player_id = 0;
         int _gameTimer = 0;
         int _gameState = GAME_STATE_IDLE;
 
         int _cmdPending = 0;
+        int _bytesNeeded = 0;
+        List<byte> _partMsg = new List<byte>();
+        List<byte> _data = new List<byte>();
+
+        bool _writing = false;
+        bool _showMsgBox = false;
 
         private Point _pt1Scr = Point.Empty;
         private PointF _ptOffsetOld = new PointF(0, 0);
@@ -66,13 +77,16 @@ namespace MultiSaper
         private PointF _ptOffsetMax = new PointF(0, 0);
 
         ArrayList _playersList = new ArrayList();
-
+        ArrayList myClicksPast = new ArrayList();
+        ArrayList myClicksCurr = new ArrayList();
         private TcpClient _tcpClient = null;
         NetworkStream _stream;
         IAsyncResult _result;
         AsyncCallback _callBackEndRead;
         AsyncCallback _callBackEndWrite;
         byte[] _rxBuf = new byte[8192];
+
+        private static Timer timer;
 
         public Form1()
         {
@@ -85,6 +99,7 @@ namespace MultiSaper
             int liczba_losowa = r.Next(999999);
             textBoxLognname.Text = "Player_" + liczba_losowa.ToString();
             textBoxIPAddress.Text = "192.168.1.80";
+            textBoxPort.Text = "3000";
         }
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
@@ -129,19 +144,21 @@ namespace MultiSaper
         private void pictureBoxBoard_Paint(object sender, PaintEventArgs e)
         {
 
-            if (_gameState < GAME_STATE_WAITING) return;
+            if(_board == null) return;
+            
+
 
             int box_width = pictureBoxBoard.Width - _pasek_naglowka;
             int box_height = pictureBoxBoard.Height - _pasek_naglowka;
             int columns = (int)Math.Floor((double)(box_width / _rozmiar_pola));
             int rows = (int)Math.Floor((double)(box_height / _rozmiar_pola));
 
-            _ptOffsetMax.X = (_sizeX - columns) * _rozmiar_pola;
-            _ptOffsetMax.Y = (_sizeY - rows) * _rozmiar_pola;
+            _ptOffsetMax.X = (_sizeX - columns + 1) * _rozmiar_pola;
+            _ptOffsetMax.Y = (_sizeY - rows + 1) * _rozmiar_pola;
             hScrollBar1.Maximum = (int)_ptOffsetMax.X;
             vScrollBar1.Maximum = (int)_ptOffsetMax.Y;
-            hScrollBar1.Value = (int)_ptOffset.X;
-            vScrollBar1.Value = (int)_ptOffset.Y;
+            hScrollBar1.Value = (int)Math.Min(_ptOffset.X, _ptOffsetMax.X);
+            vScrollBar1.Value = (int)Math.Min(_ptOffset.Y, _ptOffsetMax.Y);
 
             _offsetX = (int)Math.Floor((double)(_ptOffset.X / _rozmiar_pola));
             if (_offsetX < 0) _offsetX = 0;
@@ -156,6 +173,7 @@ namespace MultiSaper
             Pen penGray = new Pen(Color.Gray);
             Pen penRed = new Pen(Color.Red);
             Pen penWhite = new Pen(Color.White);
+            Pen penBlue = new Pen(Color.Blue, 3);
             SolidBrush brushBlack = new SolidBrush(Color.Black);
             SolidBrush brushRed = new SolidBrush(Color.Red);
             SolidBrush brushGreen = new SolidBrush(Color.Green);
@@ -205,9 +223,27 @@ namespace MultiSaper
                         g.DrawString(val.ToString(), fontArial12, brushBlack,
                             px + 12 - (sz.Width / 2), py + 12 - (sz.Height / 2));
                     }
+                    else if (state == 20) //MISFLAG uncovered 0
+                    {
+                        PointF[] triang = { new PointF(px + 6, py + 4), new PointF(px + 6, py + 20), new PointF(px + 20, py + 12) };
+                        g.DrawPolygon(penBlack, triang);
+                        g.DrawRectangle(penBlue, px + 2, py + 2, 20, 20);
+
+                    }
+                    else if ((state > 20) && (state < 29)) //+50 = _ME
+                    {
+                        PointF[] triang = { new PointF(px + 6, py + 4), new PointF(px + 6, py + 20), new PointF(px + 20, py + 12) };
+                        g.DrawPolygon(penBlack, triang);
+                        int val = state - 20;
+                        SizeF sz = g.MeasureString(val.ToString(), fontArial12);
+                        g.DrawString(val.ToString(), fontArial12, brushBlack,
+                            px + 12 - (sz.Width / 2), py + 12 - (sz.Height / 2));
+
+                    }
                     else if (state == 60) //uncovered 0 _ME
                     {
-                        g.DrawEllipse(penBlack, px + 11, py + 11, 2, 2);
+                        g.DrawRectangle(penBlue, px + 2, py + 2, 20, 20);
+
                     }
                     else if ((state > 60) && (state < 69)) //+50 = _ME
                     {
@@ -215,26 +251,32 @@ namespace MultiSaper
                         SizeF sz = g.MeasureString(val.ToString(), fontArial12);
                         g.DrawString(val.ToString(), fontArial12, brushBlack,
                             px + 12 - (sz.Width / 2), py + 12 - (sz.Height / 2));
-                        g.DrawEllipse(penWhite, px + 11, py + 11, 2, 2);
+                        g.DrawRectangle(penBlue, px + 2, py + 2, 20, 20);
+
 
                     }
                     else if (state == 70) //MISFLAG_ME uncovered 0
                     {
                         PointF[] triang = { new PointF(px + 6, py + 4), new PointF(px + 6, py + 20), new PointF(px + 20, py + 12) };
                         g.DrawPolygon(penBlack, triang);
-                        g.DrawEllipse(penBlack, px + 11, py + 11, 2, 2);
+                        g.DrawRectangle(penBlue, px + 2, py + 2, 20, 20);
+
                     }
                     else if ((state > 70) && (state < 79)) //+50 = _ME
                     {
                         PointF[] triang = { new PointF(px + 6, py + 4), new PointF(px + 6, py + 20), new PointF(px + 20, py + 12) };
                         g.DrawPolygon(penBlack, triang);
-                        g.DrawEllipse(penBlack, px + 11, py + 11, 2, 2);
+                        g.DrawRectangle(penBlue, px + 2, py + 2, 20, 20);
+                        int val = state - 70;
+                        SizeF sz = g.MeasureString(val.ToString(), fontArial12);
+                        g.DrawString(val.ToString(), fontArial12, brushBlack,
+                            px + 12 - (sz.Width / 2), py + 12 - (sz.Height / 2));
                     }
                     else if (state == BOMB_COVERED)
                     {
                         g.DrawRectangle(penBlack, px + 2, py + 2, 20, 20);
                         //debug only
-                        g.DrawRectangle(penBlack, px + 8, py + 8, 8, 8);
+                        //g.DrawRectangle(penBlack, px + 8, py + 8, 8, 8);
                     }
                     else if (state == BOMB_UNCOVERED_OFF)
                     {
@@ -243,7 +285,8 @@ namespace MultiSaper
                     else if (state == BOMB_UNCOVERED_OFF_ME)
                     {
                         g.FillEllipse(brushRed, j * _rozmiar_pola + _pasek_naglowka + 6, i * _rozmiar_pola + _pasek_naglowka + 6, 12, 12);
-                        g.DrawEllipse(penBlack, px + 11, py + 11, 2, 2);
+                        g.DrawRectangle(penBlue, px + 2, py + 2, 20, 20);
+
                     }
                     else if (state == BOMB_UNCOVERED_FLAG)
                     {
@@ -254,7 +297,8 @@ namespace MultiSaper
                     {
                         PointF[] triang = { new PointF(px + 6, py + 4), new PointF(px + 6, py + 20), new PointF(px + 20, py + 12) };
                         g.FillPolygon(brushGreen, triang);
-                        g.DrawEllipse(penBlack, px + 11, py + 11, 2, 2);
+                        g.DrawRectangle(penBlue, px + 2, py + 2, 20, 20);
+
                     }
 
                 }
@@ -266,8 +310,8 @@ namespace MultiSaper
             if (e.Button == MouseButtons.Right)
             {
                 int polenr = getPole(e.Location);
-                labelDebug.Text = polenr.ToString();
-                SendClick(polenr, SEND_RIGHTCLICK);
+                if (polenr < _sizeBoard)
+                    SendClick(polenr, SEND_RIGHTCLICK);
             }
         }
 
@@ -297,7 +341,6 @@ namespace MultiSaper
                     _ptOffset.Y += _pt1Scr.Y - e.Location.Y;
                     if (_ptOffset.Y < 0) _ptOffset.Y = 0;
                     if (_ptOffset.Y > _ptOffsetMax.Y) _ptOffset.Y = _ptOffsetMax.Y;
-                    labelDebug.Text = _ptOffset.ToString();
 
                     pictureBoxBoard.Invalidate();
                 }
@@ -320,13 +363,12 @@ namespace MultiSaper
                         _ptOffset.Y += _pt1Scr.Y - e.Location.Y;
                         if (_ptOffset.Y < 0) _ptOffset.Y = 0;
                         if (_ptOffset.Y > _ptOffsetMax.Y) _ptOffset.Y = _ptOffsetMax.Y;
-                        labelDebug.Text = _ptOffset.ToString();
                     }
                     else
                     {
                         int polenr = getPole(ptMouse);
-                        labelDebug.Text = polenr.ToString();
-                        SendClick(polenr, SEND_LEFTCLICK);
+                        if (polenr < _sizeBoard)
+                            SendClick(polenr, SEND_LEFTCLICK);
                     }
                     pictureBoxBoard.Invalidate();
                     _ptOffsetOld = _pt1Scr = Point.Empty;
@@ -335,16 +377,43 @@ namespace MultiSaper
 
         }
 
+        private void setupBoard()
+        {
+            _sizeX = _board_edge;
+            _sizeY = _board_edge;
+            _sizeBoard = _board_edge * _board_edge;
+
+            _board = new int[_sizeBoard];
+            pictureBoxBoard.Invoke((MethodInvoker)delegate
+            {
+                pictureBoxBoard.MaximumSize = new Size((_board_edge+1) * _rozmiar_pola -6, (_board_edge+1) * _rozmiar_pola -6);
+            });
+        }
+
+
+
         private void ConnectServer()
         {
 
             if ((_tcpClient != null) && (_tcpClient.Connected)) return;
 
             string adresIP = textBoxIPAddress.Text;
+            int port;
             try
             {
+                port = int.Parse(textBoxPort.Text);
+
+            }
+            catch (Exception) {
+                MessageBox.Show("Error! Wrong port number");
+                return;
+            }
+
+            try
+            {
+                
                 textBoxTCPIPClient.SelectedText = "Connecting server ...\r\n";
-                _tcpClient = new TcpClient(adresIP, 3000);
+                _tcpClient = new TcpClient(adresIP, port);
             }
             catch (SocketException)
             {
@@ -385,7 +454,6 @@ namespace MultiSaper
 
         void DebugWriteSafe(string msg)
         {
-            //return;
             textBoxTCPIPClient.Invoke((MethodInvoker)delegate
             {
                 textBoxTCPIPClient.SelectedText = msg + "\r\n";
@@ -396,7 +464,7 @@ namespace MultiSaper
             try
             {
                 _stream.EndWrite(result);
-
+                _writing = false;
             }
             catch (Exception ex)
             {
@@ -405,10 +473,10 @@ namespace MultiSaper
                 return;
             }
         }
+        
         private void GetData(IAsyncResult result)
         {
             int bytesReceived;
-            int bytesNeeded =0;
             try
             {
                 bytesReceived = _stream.EndRead(result);
@@ -435,164 +503,198 @@ namespace MultiSaper
                 return;
             }
 
+            
             if (bytesReceived > 0)
             {
-                if (_cmdPending == 0)
+
+                _partMsg.AddRange(_rxBuf.Take(bytesReceived));
+
+
+                if (bytesReceived < _bytesNeeded)
                 {
+                    _bytesNeeded = _bytesNeeded - bytesReceived;
 
-                    if (_rxBuf[0] == SEND_WRONG_NAME)
-                    {
-                        labelInfo.Invoke((MethodInvoker)delegate
-                        {
-                            labelInfo.Text = "Press <Play> to join the game";
-                        });
-                        buttonLogin.Invoke((MethodInvoker)delegate
-                        {
-                            buttonLogin.Enabled = true;
-                        });
-
-                        DebugWriteSafe("Wrong name entered");
-                        MessageBox.Show("Ten nick jest już zajęty");
-
-                        DisconnectServer();
-                        _gameState = GAME_STATE_IDLE;
-                    }
-                    else
-                    {
-                        _cmdPending = _rxBuf[0];
-                        bytesNeeded = (int)_rxBuf[1] | (int)_rxBuf[2] << 8 | (int)_rxBuf[3] << 16;
-                        DebugWriteSafe("Bytes needed:" + bytesNeeded.ToString() + " cmd: " + _cmdPending.ToString());
-                    }
                 }
                 else
                 {
 
-                    int cmd = _cmdPending;
-
-                    DebugWriteSafe("Bytes recieved:" + bytesReceived.ToString() + " cmd: " + _cmdPending.ToString());
-
-                    _cmdPending = 0;
-                    bytesNeeded = 4;
-                    if (_player_id == 0) //player not logged in
+                    if (_cmdPending == 0)
                     {
-                        if (cmd == SEND_LOGIN) //login response
-                        {
-                            _player_id = (int)_rxBuf[0] | (int)_rxBuf[1] << 8 | (int)_rxBuf[2] << 16;
-                            DebugWriteSafe("Player ID received: " + _player_id.ToString());
-                            Player pl = new Player(_player_id, 0, textBoxLognname.Text);
-                            _playersList.Add(pl);
-                            UpdateTopScores();
-                        }
-                    }
-                    else //player logged in
-                    {
-                        if (cmd == SEND_GAME_STATE) //game state
-                        {
-                            int prevState = _gameState;
-                            int cnt = bytesReceived / 3;
 
-                            int rs = 3; //record size = 1b state, 2b time
-                            for (int i = 0; i < cnt; i++)
-                            {
-                                _gameState = (int)_rxBuf[i * rs ];
-                                _gameTimer = (int)_rxBuf[i * rs + 1] | (int)_rxBuf[i * rs + 2] << 8;
-                            }
-                            String info = "Press <Play> to join the game";
-                            switch (_gameState)
-                            {
-                                case GAME_STATE_IDLE:
-                                    info = "Press <Play> to join the game";
-                                    if (prevState > GAME_STATE_IDLE)
-                                    {
-                                        labelInfo.Invoke((MethodInvoker)delegate
-                                        {
-                                            buttonLogin.Enabled = true;
-                                        });
-                                        DisconnectServer();
-                                    }
-                                    break;
-                                case GAME_STATE_WAITING:
-                                    info = "Time to start :" + _gameTimer.ToString();
-                                    if (prevState < GAME_STATE_WAITING) pictureBoxBoard.Invalidate();//display board
-                                    break;
-                                case GAME_STATE_GAME:
-                                    info = "Remaining time : " + _gameTimer.ToString();
-                                    if (prevState < GAME_STATE_GAME) pictureBoxBoard.Invalidate();//player joined after start
-                                    break;
-                                case GAME_STATE_OVER:
-                                    info = "Game over!";
-                                    break;
-                            }
-
+                        if (_partMsg[0] == SEND_WRONG_NAME)
+                        {
                             labelInfo.Invoke((MethodInvoker)delegate
                             {
-                                labelInfo.Text = info;
+                                labelInfo.Text = "Press <Play> to join the game";
                             });
-                        }
-                        else if (cmd == SEND_BOARD_DATA)//board update
-                        {
-                            int cnt = bytesReceived / 6;
-                            DebugWriteSafe("Board update received: " + cnt.ToString());
-                            int rs = 6; //record size = 3b num, 3b data
-                            for (int i = 0; i < cnt; i++)
+                            buttonLogin.Invoke((MethodInvoker)delegate
                             {
-                                int num = (int)_rxBuf[i * rs + 0] | (int)_rxBuf[i * rs + 1] << 8 | (int)_rxBuf[i * rs + 2] << 16;
-                                int data = (int)_rxBuf[i * rs + 3] | (int)_rxBuf[i * rs + 4] << 8 | (int)_rxBuf[i * rs + 5] << 16;
-                                int plid = (int)(data / 100);
-                                int val = (int)(data % 100);
-                                if (plid == _player_id)
-                                    _board[num] = val + 50;
-                                else
-                                    _board[num] = val;
-                            }
+                                buttonLogin.Enabled = true;
+                            });
 
-                            pictureBoxBoard.Invalidate();
-                        }
-                        else if (cmd == SEND_PLAYER_DATA) //add players 
-                        {
-                            int cnt = bytesReceived / 38;
-                            DebugWriteSafe("New players data received: " + cnt.ToString());
-                            int rs = 38; //record size = 3b id, 3b score, 32b name
-                            for (int i = 0; i < cnt; i++)
-                            {
-                                int id = (int)_rxBuf[i * rs ] | (int)_rxBuf[i * rs + 1] << 8 | (int)_rxBuf[i * rs + 2] << 16;
-                                int score = (int)_rxBuf[i * rs + 3] | (int)_rxBuf[i * rs + 4] << 8 | (int)_rxBuf[i * rs + 5] << 16;
-                                string name = Encoding.ASCII.GetString(_rxBuf, i * rs + 6, 32);
-                                if (id != _player_id)
-                                {
-                                    Player pl = new Player(id, score, name);
-                                    _playersList.Add(pl);
-                                }
-                            }
-                            UpdateTopScores();
-                        }
-                        else if (cmd == SEND_SCORE_DATA) //players' scores update
-                        {
-                            int cnt = bytesReceived / 6;
-                            DebugWriteSafe("Players' scores update received: " + cnt.ToString());
-                            for (int i = 0; i < cnt; i++)
-                            {
-                                int id = (int)_rxBuf[i * 6 + 0] | (int)_rxBuf[i * 6 + 1] << 8 | (int)_rxBuf[i * 6 + 2] << 16;
-                                int score = (int)_rxBuf[i * 6 + 3] | (int)_rxBuf[i * 6 + 4] << 8 | (int)_rxBuf[i * 6 + 5] << 16;
-                                if (id == _player_id)
-                                {
-                                    labelScore.Invoke((MethodInvoker)delegate
-                                    {
-                                        labelScore.Text = "Score: " + score.ToString();
-                                    });
-                                }
-                                Player pl = GetPlayer(id);
-                                pl.score = score;
-                            }
-                            UpdateTopScores();
+                            DisconnectServer();
+                            _gameState = GAME_STATE_IDLE;
+                            DebugWriteSafe("Wrong name entered");
+                            MessageBox.Show("Ten nick jest już zajęty");
+
                         }
                         else
                         {
-                            DebugWriteSafe("Unknown data received: " + cmd.ToString());
+                            _cmdPending = _partMsg[0];
+                            _bytesNeeded = (int)_partMsg[1] | (int)_partMsg[2] << 8 | (int)_partMsg[3] << 16;
+                            DebugWriteSafe("Bytes needed:" + _bytesNeeded.ToString() + " cmd: " + _cmdPending.ToString());
+                        }
+                    }
+                    else
+                    {
 
+                        int cmd = _cmdPending;
+
+                        DebugWriteSafe("Bytes recieved:" + bytesReceived.ToString() + " cmd: " + _cmdPending.ToString());
+
+                        _cmdPending = 0;
+                        _bytesNeeded = 4;
+                        if (_player_id == 0) //player not logged in
+                        {
+                            if (cmd == SEND_LOGIN) //login response
+                            {
+                                _player_id = (int)_partMsg[0] | (int)_partMsg[1] << 8 | (int)_partMsg[2] << 16;
+                                _board_edge = (int)_partMsg[3] | (int)_partMsg[4] << 8;
+                                setupBoard();
+
+                                DebugWriteSafe("Player ID received: " + _player_id.ToString());
+                                Player pl = new Player(_player_id, 0, textBoxLognname.Text);
+                                _playersList.Add(pl);
+                                UpdateTopScores();
+                            }
+                        }
+                        else //player logged in
+                        {
+                            if (cmd == SEND_GAME_STATE) //game state
+                            {
+                                int prevState = _gameState;
+                                int cnt = bytesReceived / 3;
+
+                                int rs = 3; //record size = 1b state, 2b time
+                                for (int i = 0; i < cnt; i++)
+                                {
+                                    _gameState = (int)_partMsg[i * rs];
+                                    _gameTimer = (int)_partMsg[i * rs + 1] | (int)_partMsg[i * rs + 2] << 8;
+                                }
+                                String info = "Press <Play> to join the game";
+                                switch (_gameState)
+                                {
+                                    case GAME_STATE_IDLE:
+                                        info = "Press <Play> to join the game";
+                                        if (prevState > GAME_STATE_IDLE)
+                                        {
+                                            
+                                            labelInfo.Invoke((MethodInvoker)delegate
+                                            {
+                                                buttonLogin.Enabled = true;
+                                            });
+                                            DisconnectServer();
+                                        }
+                                        break;
+                                    case GAME_STATE_WAITING:
+                                        info = "Time to start :" + _gameTimer.ToString();
+                                        if (prevState < GAME_STATE_WAITING) pictureBoxBoard.Invalidate();//display board
+                                        break;
+                                    case GAME_STATE_GAME:
+                                        info = "Remaining time : " + _gameTimer.ToString();
+                                        if (prevState < GAME_STATE_GAME)
+                                        {
+                                            timer1.Enabled = true;
+                                            pictureBoxBoard.Invalidate();//player joined after start
+                                        }
+                                        break;
+                                    case GAME_STATE_OVER:
+                                        info = "Game over!";
+                                        if (prevState < GAME_STATE_OVER) _showMsgBox=true;
+
+                                        break;
+                                }
+
+                                labelInfo.Invoke((MethodInvoker)delegate
+                                {
+                                    labelInfo.Text = info;
+                                    if (_showMsgBox)
+                                    {
+                                        MessageBox.Show(this, "Game over!");
+                                        _showMsgBox = false;
+                                    }
+                                });
+                            }
+                            else if (cmd == SEND_BOARD_DATA)//board update
+                            {
+                                int cnt = bytesReceived / 6;
+                                DebugWriteSafe("Board update received: " + cnt.ToString());
+                                int rs = 6; //record size = 3b num, 3b data
+                                for (int i = 0; i < cnt; i++)
+                                {
+                                    int num = (int)_partMsg[i * rs + 0] | (int)_partMsg[i * rs + 1] << 8 | (int)_partMsg[i * rs + 2] << 16;
+                                    int data = (int)_partMsg[i * rs + 3] | (int)_partMsg[i * rs + 4] << 8 | (int)_partMsg[i * rs + 5] << 16;
+                                    int plid = (int)(data / 100);
+                                    int val = (int)(data % 100);
+                                    if (plid == _player_id)
+                                    {
+                                        _board[num] = val + 50;
+                                        myClicksCurr.Add(num);
+                                    }
+                                    else
+                                        _board[num] = val;
+                                }
+
+                                pictureBoxBoard.Invalidate();
+                            }
+                            else if (cmd == SEND_PLAYER_DATA) //add players 
+                            {
+                                int cnt = bytesReceived / 38;
+                                DebugWriteSafe("New players data received: " + cnt.ToString());
+                                int rs = 38; //record size = 3b id, 3b score, 32b name
+                                for (int i = 0; i < cnt; i++)
+                                {
+                                    int id = (int)_partMsg[i * rs] | (int)_partMsg[i * rs + 1] << 8 | (int)_partMsg[i * rs + 2] << 16;
+                                    int score = (int)_partMsg[i * rs + 3] | (int)_partMsg[i * rs + 4] << 8 | (int)_partMsg[i * rs + 5] << 16;
+                                    string name = Encoding.ASCII.GetString(_partMsg.ToArray(), i * rs + 6, 32);
+                                    if (id != _player_id)
+                                    {
+                                        Player pl = new Player(id, score, name);
+                                        _playersList.Add(pl);
+                                    }
+                                }
+                                UpdateTopScores();
+                            }
+                            else if (cmd == SEND_SCORE_DATA) //players' scores update
+                            {
+                                int cnt = bytesReceived / 6;
+                                DebugWriteSafe("Players' scores update received: " + cnt.ToString());
+                                for (int i = 0; i < cnt; i++)
+                                {
+                                    int id = (int)_partMsg[i * 6 + 0] | (int)_partMsg[i * 6 + 1] << 8 | (int)_partMsg[i * 6 + 2] << 16;
+                                    int score = (int)_partMsg[i * 6 + 3] | (int)_partMsg[i * 6 + 4] << 8 | (int)_partMsg[i * 6 + 5] << 16;
+                                    if (id == _player_id)
+                                    {
+                                        labelScore.Invoke((MethodInvoker)delegate
+                                        {
+                                            labelScore.Text = "Score: " + score.ToString();
+                                        });
+                                    }
+                                    Player pl = GetPlayer(id);
+                                    pl.score = score;
+                                }
+                                UpdateTopScores();
+                            }
+                            else
+                            {
+                                DebugWriteSafe("Unknown data received: " + cmd.ToString());
+
+                            }
                         }
                     }
                 }
+                _partMsg.Clear();
+
             } else if (bytesReceived == 0) 
             {
                 buttonLogin.Invoke((MethodInvoker)delegate
@@ -608,6 +710,7 @@ namespace MultiSaper
                 });
 
                 DebugWriteSafe("Connection lost");
+
                 DisconnectServer();
                 _gameState = GAME_STATE_IDLE;
             }
@@ -615,7 +718,7 @@ namespace MultiSaper
             {
                 try
                 {
-                    _result = _stream.BeginRead(_rxBuf, 0, bytesNeeded, _callBackEndRead, null);
+                    _result = _stream.BeginRead(_rxBuf, 0, _bytesNeeded, _callBackEndRead, null);
                 }
                 catch (ObjectDisposedException)
                 {
@@ -628,16 +731,21 @@ namespace MultiSaper
             }
         }
 
-        private void SendClick(int num, int mousebutton)
+        private void StartToWrite(object sender, EventArgs e)
         {
-            if ((_player_id > 0) && (_gameState == GAME_STATE_GAME))
+            if (sender is Timer) DebugWriteSafe("Problems with sending data");
+
+            if (!_writing)
             {
-                byte[] data = { (byte)(mousebutton), (byte)(num), (byte)(num >> 8), (byte)(num >> 16) };
+
+                if(timer != null && timer.Enabled) timer.Stop();
+
+                _writing = true;
+                byte[] data = _data.ToArray();
 
                 try
                 {
-                    _stream.BeginWrite(data, 0, data.Length, _callBackEndWrite,null);
-
+                    _stream.BeginWrite(data, 0, data.Length, _callBackEndWrite, null);
                 }
                 catch (ArgumentNullException ex)
                 {
@@ -658,7 +766,34 @@ namespace MultiSaper
                 {
                     Console.WriteLine("SocketException: {0}", ex);
                 }
+                _data.Clear();
+            }
+            else
+            {
+                if (timer == null)
+                {
+                    timer = new Timer();
+                    timer.Interval = 1000;
+                    timer.Tick += StartToWrite;
+                } else if(timer.Enabled)
+                {
+                    timer.Stop();
+                }
+                timer.Start();
+            }
 
+                    
+        }
+
+        private void SendClick(int num, int mousebutton)
+        {
+            if ((_player_id > 0) && (_gameState == GAME_STATE_GAME))
+            {
+                byte[] data = { (byte)(mousebutton), (byte)(num), (byte)(num >> 8), (byte)(num >> 16) };
+                _data.AddRange(new List<byte> { (byte)(mousebutton), (byte)(num), (byte)(num >> 8), (byte)(num >> 16) });
+
+                StartToWrite(this, EventArgs.Empty);
+                
             }
         }
         private void buttonLogin_Click(object sender, EventArgs e)
@@ -666,12 +801,11 @@ namespace MultiSaper
             ConnectServer();
             if (_tcpClient == null)
             {
-                MessageBox.Show("Nie można połączyć z serwerem");
+                MessageBox.Show("Can't connect to the server");
             }
             else if (_tcpClient.Connected)
             {
-                try
-                {
+
                     String login = "1" + textBoxLognname.Text;//1 = ascii 49 is command code for log in
                     Byte[] data = Encoding.ASCII.GetBytes(login);
 
@@ -679,20 +813,9 @@ namespace MultiSaper
                     {
                         Array.Resize(ref data, 33);
                     }
-                    _stream.BeginWrite(data, 0, data.Length, _callBackEndWrite, null);
+                    _data.AddRange(data);
+                    StartToWrite(this, EventArgs.Empty);
 
-
-                }
-                catch (ArgumentNullException ex)
-                {
-                    Console.WriteLine("ArgumentNullException: {0}", ex);
-                    return;
-                }
-                catch (SocketException ex)
-                {
-                    Console.WriteLine("SocketException: {0}", ex);
-                    return;
-                }
                 buttonLogin.Enabled = false;
 
                 _player_id = 0;
@@ -720,6 +843,20 @@ namespace MultiSaper
             pictureBoxBoard.Invalidate();
         }
 
+        private void timer1_Tick(object sender, EventArgs e)
+        {
+            foreach (int i in myClicksPast)
+            {
+                _board[i] -= 50;
+            }
+            myClicksPast = myClicksCurr;
+            myClicksCurr = new ArrayList();
+        }
+
+        private void Form1_SizeChanged(object sender, EventArgs e)
+        {
+            pictureBoxBoard.Invalidate();
+        }
 
     }
 }
