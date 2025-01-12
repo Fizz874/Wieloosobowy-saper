@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.12)
+project(server)
+set (CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
+add_compile_options(-Wall -Wextra)
+add_executable(server "Server.cpp" "Player.h")
+configure_file(${CMAKE_SOURCE_DIR}/config.txt ${CMAKE_BINARY_DIR} COPYONLY)

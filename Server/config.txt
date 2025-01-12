@@ -1,0 +1,26 @@
+//Plik konfiguracyjny - format: klucz=wartość
+// Jeśli wartość będzie wykraczała poza odpowiedni zakres, 
+//zostanie wykorzystana wartość domyślna
+
+// Zakres: 1024 - 65535; numer portu
+port = 3000
+// Zakres: 2 - 10; 1/bomb_density - prawdopodobieństwo że dane pole zawiera bombę
+bomb_density = 4
+// Zakres: 20 - 512; ilość pól na krawędzi planszy
+board_edge = 512
+// punkty za odkrycie pola bez bomby
+blank_hit = 1
+// punkty za oflagowanie pola bez bomby
+blank_flag = -10
+// punkty za odkrycie pola z bombą
+bomb_hit = -10
+// punkty za oflagowanie pola bez bomby
+bomb_flag = 10
+// punkty za odkrycie pustego pola i go otaczających
+blank_empty = 3
+// liczba nieujemna; czas czekania na graczy w sekundach
+waiting_timeout = 5
+// liczba nieujemna; czas gry w sekundach
+game_timeout = 300
+// liczba nieujemna; czas zanim można zacząć kolejną rozgrywkę w sekundach
+restart_timeout = 0
