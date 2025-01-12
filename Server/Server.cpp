@@ -4,7 +4,8 @@
 #include <string>
 #include <cstring>
 #include "Player.h"
-
+#include <sstream>
+#include <fstream>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -18,12 +19,7 @@
 
 
 #define DEFAULT_BUFLEN 8192
-#define DEFAULT_PORT 3000
 
-#define BOARD_SIZEX 512
-#define BOARD_SIZEY 512
-#define BOARD_SIZE 262144 //512x512
-#define BOMB_DENSITY 4 //statistically one in BOMB_DENSITY is a bomb
 //0 - 8 BLANK_COVERED adjacent to bombs
 #define BLANK_COVERED_END 9
 //10 - 18 BLANK_UNCOVERED adjacent to bombs
@@ -32,12 +28,6 @@
 #define BOMB_COVERED 31
 #define BOMB_UNCOVERED_OFF 32
 #define BOMB_UNCOVERED_FLAG 33
-
-#define TICK_INTERVAL 40      //40ms
-#define TICKS_PER_SECOND 25      //25x40ms=1s
-#define WAITING_TIMEOUT 5      //s
-#define GAME_TIMEOUT 15      //s
-#define RESTART_TIMEOUT 3      //2s
 
 #define GAME_STATE_IDLE 0
 #define GAME_STATE_WAITING 1
@@ -55,10 +45,26 @@
 
 typedef unsigned char byte;
 
+int port = 3000;
+int bomb_density = 4; //statistically one in BOMB_DENSITY is a bomb
+int board_edge = 60;
+int board_size = 60*60;
+
+int blank_hit = 1;
+int blank_flag = -10;
+int bomb_hit = -10;
+int bomb_flag = 10;
+int blank_empty = 3;
+
+int waiting_timeout = 5;
+int game_timeout = 300;
+int restart_timeout = 3;
+
+
 int next_player_id = 11;
 int unnamed_players = 0;
-int covered_fields = BOARD_SIZE;
-int board[BOARD_SIZE];
+int covered_fields = board_size;
+int* board = nullptr;
 
 int LSock;
 
@@ -66,13 +72,14 @@ std::vector<pollfd> SocketsPollVect;
 std::vector<Player*> PlayersVect;
 std::vector<Player*> NewPlayersVect;
 std::vector<Player*> DeletedPlayersVect;
+std::vector<Player*> CombinedPlayersVect;
 std::vector<Player*> ScoresUpdateVect;
 std::vector<int> BoardUpdateVect;
 
 char send_buffer[DEFAULT_BUFLEN];
-int frameCnt = TICKS_PER_SECOND;
 int gameTimer = 0;
 int gameState = GAME_STATE_IDLE;
+int pollTimeout = 200; 
 
 //wyszukuje playera po deskryptorze
 Player* GetPlayer(int desc)
@@ -83,18 +90,6 @@ Player* GetPlayer(int desc)
 	return nullptr;
 }
 
-//usuwa z PlayersVect gracza, który sie rozłączył
-void RemovePlayer(int desc)
-{
-	for (auto iter = PlayersVect.begin(); iter != PlayersVect.end(); ++iter) {
-		if ((*iter)->fd == desc) {
-			Player* pl = (*iter);
-			PlayersVect.erase(iter);
-			DeletedPlayersVect.push_back(pl);
-			return;
-		}
-	}
-}
 
 //usuwa deskryptor z SocketsPollVect przed zamknięciem
 void RemoveConnection(int desc)
@@ -108,17 +103,53 @@ void RemoveConnection(int desc)
 	}
 }
 
+//usuwa z PlayersVect gracza, który sie rozłączył
+void RemovePlayer(int desc)
+{
+	for (auto iter = PlayersVect.begin(); iter != PlayersVect.end(); ++iter) {
+		if ((*iter)->fd == desc) {
+			Player* pl = (*iter);
+			PlayersVect.erase(iter);
+
+			if(pl->id == 0){
+				for(auto it = CombinedPlayersVect.begin(); it != CombinedPlayersVect.end(); ++it) {
+					if (((*it)->id == 0) && ((*it)->fd = pl->fd)) {
+						CombinedPlayersVect.erase(it);
+						break;
+					}
+				}
+				unnamed_players--;
+				delete pl;
+			} else {	
+				DeletedPlayersVect.push_back(pl);
+			}
+
+			return;
+		}
+	}
+}
+
+
 //odłącza wszystkich graczy po skończonej rozgrywce
 void DisconnectAllPlayers()
 {
 	for (auto iter = PlayersVect.begin(); iter != PlayersVect.end(); ++iter)
 	{
 		Player* pl = (*iter);
-		RemoveConnection(pl->fd);
-		close(pl->fd);
-		delete pl; 
+		if(pl != nullptr){
+			RemoveConnection(pl->fd);
+			close(pl->fd);
+			delete pl; 
+		}
+
+	}
+	for (auto pl: DeletedPlayersVect){
+		if(pl != nullptr)
+			delete pl; 
 	}
 	PlayersVect.clear();
+	DeletedPlayersVect.clear();
+	CombinedPlayersVect.clear();
 }
 
 
@@ -141,7 +172,7 @@ void SendWithPoll(Player* pl, int pos){
 
 
 bool IsNameAvailable(std::string name){
-	for(auto iter = PlayersVect.begin(); iter != PlayersVect.end(); ++iter){
+	for(auto iter = CombinedPlayersVect.begin(); iter != CombinedPlayersVect.end(); ++iter){
 		Player* pl = (*iter);
 		if (pl->id != 0){
 			if(pl->name == name){
@@ -157,6 +188,7 @@ void OnPlayer(int desc){
 	Player* pl = new Player();
 	pl->fd = desc;
 	PlayersVect.push_back(pl);
+	CombinedPlayersVect.push_back(pl);
 	unnamed_players++;
 }
 
@@ -170,7 +202,8 @@ void OnNewPlayer(Player* pl, std::string name)
 		unnamed_players--;
 	} else {
 		send_buffer[0] = SEND_WRONG_NAME;
-		SendWithPoll(pl,1);
+		std::fill(send_buffer+1, send_buffer+4,0);
+		SendWithPoll(pl,4);
 	}
 }
 
@@ -182,8 +215,8 @@ void ChainedUncover(int field, int id){
 		BoardUpdateVect.push_back(field);
 
 		//sprawdzaj sąsiadów
-		int fieldX = field % BOARD_SIZEX;
-		int fieldY = field / BOARD_SIZEY;
+		int fieldX = field % board_edge;
+		int fieldY = field / board_edge;
 		
 		int row[8] = {-1,1,0,0,-1,-1,1,1};
 		int col[8] = {0,0,-1,1,-1,1,-1,1};
@@ -192,9 +225,9 @@ void ChainedUncover(int field, int id){
 			int newX = fieldX+col[i];
 			int newY = fieldY+row[i];
 
-			if((newX >= 0 && newX < BOARD_SIZEX) 
-				&& (newY >= 0 && newY < BOARD_SIZEY)){
-				int newField = newX + newY*BOARD_SIZEY;
+			if((newX >= 0 && newX < board_edge) 
+				&& (newY >= 0 && newY < board_edge)){
+				int newField = newX + newY*board_edge;
 				if(board[newField] < BLANK_COVERED_END) ChainedUncover(newField, id);
 			
 			}
@@ -216,17 +249,17 @@ void OnPlayersClick(Player* pl, int num, int cmd)
 {
 	int val = 0;
 	if(board[num] == 0 && cmd == SEND_LEFTCLICK){
-		val = 3;
+		val = blank_empty;
 	} else if (board[num] < BLANK_COVERED_END)
 	{
 		if (cmd == SEND_LEFTCLICK)
 		{
-			val = 1;
+			val = blank_hit;
 			board[num] += 10;
 		}
 		else
 		{
-			val = -10;
+			val = blank_flag;
 			board[num] += 20;
 		}
 	}
@@ -234,32 +267,29 @@ void OnPlayersClick(Player* pl, int num, int cmd)
 	{
 		if (cmd == SEND_LEFTCLICK)
 		{
-			val = -10;
+			val = bomb_hit;
 			board[num] = BOMB_UNCOVERED_OFF;
 		}
 		else
 		{
-			val = 10;
+			val = bomb_flag;
 			board[num] = BOMB_UNCOVERED_FLAG;
 		}
+	} else {
+		return;
 	}
-	if (val != 0)
-	{
-		if(board[num] == 0){
-			ChainedUncover(num, pl->id);
-		} else {
-			board[num] = pl->id * 100 + board[num]; // add players id
-			BoardUpdateVect.push_back(num);
-		}
-		pl->score += val;
-		if (pl->score < 0) pl->score = 0;
-		ScoresUpdateVect.push_back(pl);
+
+	if(board[num] == 0){
+		ChainedUncover(num, pl->id);
+	} else {
+		board[num] = pl->id * 100 + board[num]; // add players id
+		BoardUpdateVect.push_back(num);
 	}
+	pl->score += val;
+	if (pl->score < 0) pl->score = 0;
+	ScoresUpdateVect.push_back(pl);
 
 }
-
-
-
 
 
 //obsługa komunikacji TCP IP 
@@ -279,11 +309,11 @@ bool StartServer()
 	LSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (LSock <= 0) {
 		perror("Unable to create listening socket");
-		return -1;
+		return false;
 	}
 	if (!MakeNonBlocking(LSock)) {
 		perror("Unable to set listening socket to non-blocking");
-		return -1;
+		return false;
 	}
 
 	const int one = 1;
@@ -292,15 +322,15 @@ bool StartServer()
 	sockaddr_in LSockAddr {};
 	LSockAddr.sin_family = AF_INET;
 	LSockAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	LSockAddr.sin_port = htons(DEFAULT_PORT);
+	LSockAddr.sin_port = htons(port);
 	if (bind(LSock, (sockaddr*)&LSockAddr, sizeof(LSockAddr)) < 0) {
 		perror("Unable to bind listening socket");
-		return -1;
+		return false;
 	}
 
 	if (listen(LSock, 10) < 0) {
 		perror("Unable to open listening socket");
-		return -1;
+		return false;
 	}
 
 	pollfd listen_fd {};
@@ -313,15 +343,14 @@ bool StartServer()
 }
 bool PollSockets()
 {
-
-	int result = poll(SocketsPollVect.data(), SocketsPollVect.size(),0);
+	int result = poll(SocketsPollVect.data(), SocketsPollVect.size(),pollTimeout);
 	if (result < 0) {
 		perror("Unable to poll");
-		return -1;
+		return false;
 	}
 
 	if (result == 0) 
-		return false;
+		return true;
 
 
 	for (auto iter = SocketsPollVect.begin(); iter != SocketsPollVect.end();) {
@@ -382,11 +411,12 @@ bool PollSockets()
 					printf("Client IP addr: %s:%i\n", inet_ntoa(CSockAddr.sin_addr), ntohs(CSockAddr.sin_port));
 
 
-					pollfd client_fd;
+					pollfd client_fd {};
 					client_fd.fd = CSock;
 					client_fd.events=POLLIN;
-					SocketsPollVect.push_back(client_fd);
-					iter = SocketsPollVect.begin();
+					auto indeks = std::distance(iter, SocketsPollVect.begin()); 
+					SocketsPollVect.push_back(client_fd); 
+					iter = SocketsPollVect.begin() + indeks;
 
 					OnPlayer(CSock);
 
@@ -502,6 +532,8 @@ bool PollSockets()
 						}
 					
 					}
+				} else {
+					printf("No player with such file descriptor: %i\n", iter->fd);
 				}
 			}
 		}
@@ -514,10 +546,10 @@ bool PollSockets()
 					printf("Unable to read from client: %i\n", iter->fd);
 				}
 				int PSock = iter->fd;
-				RemovePlayer(PSock);
-
-				close(PSock);
+				
 				iter = SocketsPollVect.erase(iter);
+				RemovePlayer(PSock);
+				close(PSock);
 				//printf("\tSize of fds after remove: %i, client %i\n\n", (int)SocketsPollVect.size(), PSock);
 				continue;
 			}
@@ -530,13 +562,13 @@ bool PollSockets()
 
 
 
-
-//po zalogowaniu odsyła graczowi przyznany ID
+//po zalogowaniu odsyła graczowi przyznany ID i rozmiar planszy
 void SendPlayersID(Player* pl)
 {
-	char resp[7] = { SEND_LOGIN,3,0,0,(char)(pl->id), (char)(pl->id >> 8), (char)(pl->id >> 16) };
-	std::copy(resp, resp + 7, send_buffer);
-	SendWithPoll(pl, 7);
+	char resp[9] = { SEND_LOGIN,5,0,0,(char)(pl->id), (char)(pl->id >> 8), (char)(pl->id >> 16),
+	(char) board_edge, (char) (board_edge >> 8) };
+	std::copy(resp, resp + 9, send_buffer);
+	SendWithPoll(pl, 9);
 	
 }
 
@@ -547,9 +579,9 @@ void SendBoard(Player* pl)
 	int pos = 4;// [0] cmd [1,2,3] count
 	int cnt = 0;
 	//1364 to one buffer
-	for (int i = 0; i < BOARD_SIZE; i++)
+	for (int i = 0; i < board_size; i++)
 	{
-		if (board[i] > BLANK_COVERED_END /*&& board[i] != BOMB_COVERED*/) //all but covered 
+		if (board[i] > BLANK_COVERED_END && board[i] != BOMB_COVERED) //all but covered 
 		{
 			send_buffer[pos++] = (byte)(i);
 			send_buffer[pos++] = (byte)(i >> 8);
@@ -617,9 +649,9 @@ void SendPlayersData(Player* pl)
 {
 	//200 to one buffer, one record = 38b; 3b id, 3b score, 32b name + 4b header
 	send_buffer[0] = SEND_PLAYER_DATA;// players update
-	int pos = 4;// [0] cmd [1,2,3] count // 
+	int pos = 4;// [0] cmd [1,2,3] count 
 	int cnt = 0;
-	for (auto iter = PlayersVect.begin(); iter != PlayersVect.end(); ++iter)
+	for (auto iter = CombinedPlayersVect.begin(); iter != CombinedPlayersVect.end(); ++iter)
 	{
 		Player* plex = (*iter);
 		if (plex == pl) continue;//dont send to itself
@@ -777,12 +809,18 @@ void SendBoardUpdate()
 			
 		}
 	}
+
+	if (covered_fields <= 0 && gameState == GAME_STATE_GAME){
+			gameState = GAME_STATE_OVER;
+			gameTimer = restart_timeout;
+			std::cout << "Game state: GAME_STATE_OVER" << std::endl;
+	}
 }
 
 
 void UpdateAdjacentBombs(int field){
-	int fieldX = field % BOARD_SIZEX;
-	int fieldY = field / BOARD_SIZEY;
+	int fieldX = field % board_edge;
+	int fieldY = field / board_edge;
 	
 	int row[8] = {-1,1,0,0,-1,-1,1,1};
 	int col[8] = {0,0,-1,1,-1,1,-1,1};
@@ -791,9 +829,9 @@ void UpdateAdjacentBombs(int field){
 		int newX = fieldX+col[i];
 		int newY = fieldY+row[i];
 
-		if((newX >= 0 && newX < BOARD_SIZEX) 
-			&& (newY >= 0 && newY < BOARD_SIZEY)){
-			int newField = newX + newY*BOARD_SIZEY;
+		if((newX >= 0 && newX < board_edge) 
+			&& (newY >= 0 && newY < board_edge)){
+			int newField = newX + newY*board_edge;
 			if(board[newField] != BOMB_COVERED) board[newField]++;
 		
 		}
@@ -811,18 +849,18 @@ void OneSecondTimer()
 		if (gameTimer < 0)
 		{
 			gameState = GAME_STATE_GAME;
-			gameTimer = GAME_TIMEOUT;
-			std::cout << "Game state: GAME_STATE_GAME\r\n";
+			gameTimer = game_timeout;
+			std::cout << "Game state: GAME_STATE_GAME" << std::endl;
 		}
 	}
 	else if (gameState == GAME_STATE_GAME)
 	{
 		gameTimer--;
-		if (gameTimer < 0 or covered_fields <= 0)
+		if (gameTimer < 0)
 		{
 			gameState = GAME_STATE_OVER;
-			gameTimer = RESTART_TIMEOUT;
-			std::cout << "Game state: GAME_STATE_OVER\r\n";
+			gameTimer = restart_timeout;
+			std::cout << "Game state: GAME_STATE_OVER" << std::endl;
 		}
 	}
 	else if (gameState == GAME_STATE_OVER)
@@ -833,13 +871,13 @@ void OneSecondTimer()
 			gameState = GAME_STATE_IDLE;
 			SendGameState();//has connections still
 			DisconnectAllPlayers();
-			std::cout << "Game state: GAME_STATE_IDLE\r\n";
+			std::cout << "Game state: GAME_STATE_IDLE"<< std::endl;
 		}
 	}
 	SendGameState();
 }
 
-//obsługuje aktualizacje stanu gry co 1 tick = 40ms
+//obsługuje aktualizacje stanu gry
 void OneTickTimer()
 {
 	if (gameState == GAME_STATE_IDLE) //zero players
@@ -847,14 +885,13 @@ void OneTickTimer()
 		if (PlayersVect.size()-unnamed_players > 0)
 		{
 			gameState = GAME_STATE_WAITING;
-			gameTimer = WAITING_TIMEOUT;
+			gameTimer = waiting_timeout;
 			//prepare the board
-			covered_fields=BOARD_SIZE;
-			memset(board, 0, sizeof(board));
-			srand(time(0));
-			for (int i = 0; i < BOARD_SIZE; i++)
+			covered_fields=board_size;
+			std::fill(board,board + board_size, 0);
+			for (int i = 0; i < board_size; i++)
 			{
-				int liczba_losowa = rand() % BOMB_DENSITY;
+				int liczba_losowa = rand() % bomb_density;
 				if (liczba_losowa == 1) {
 
 					board[i] = BOMB_COVERED;
@@ -863,14 +900,16 @@ void OneTickTimer()
 								
 			}	
 
-
-			std::cout << "Game state: GAME_STATE_WAITING\r\n";
+			std::cout << "Game state: GAME_STATE_WAITING"<< std::endl;
 		}
 	}	
 	else if (PlayersVect.size()-unnamed_players == 0)//no players connected
 	{
 		gameState = GAME_STATE_IDLE;
-		std::cout << "Game state: GAME_STATE_IDLE\r\n";
+		std::cout << "Game state: GAME_STATE_IDLE"<< std::endl;
+		
+		DeletedPlayersVect.clear();
+		CombinedPlayersVect.clear();
 	}
 
 	while (!NewPlayersVect.empty())
@@ -895,36 +934,128 @@ void OneTickTimer()
 
 }
 
+
+
+bool loadConfig(){
+
+	std::string line;
+	std::ifstream file("config.txt");
+    if (file.is_open()) {
+		while(std::getline(file, line) ){
+			
+			line.erase(0, line.find_first_not_of(" \t")); 
+			line.erase(line.find_last_not_of(" \t") + 1);
+			if (line.empty() || line.substr(0,2) == "//") continue;
+
+			std::istringstream is_line(line);
+			std::string key;
+
+
+			if(std::getline(is_line,key,'=')){
+				std::string value;
+
+				if(std::getline(is_line, value)){
+
+					key.erase(0, key.find_first_not_of(" \t")); 
+					key.erase(key.find_last_not_of(" \t") + 1); 
+					value.erase(0, value.find_first_not_of(" \t")); 
+					value.erase(value.find_last_not_of(" \t") + 1); 
+
+
+					try {
+						if (key == "port"){
+						port= std::stoi(value);
+						if(port > 65535 || port < 1024){
+							port = 3000;
+						}
+							
+						} else if (key == "bomb_density"){
+							bomb_density= std::stoi(value);
+							if(bomb_density > 10 || bomb_density < 2) bomb_density = 3;
+
+						} else if (key == "board_edge"){
+							board_edge= std::stoi(value);
+							if(board_edge > 512 || board_edge < 20) board_edge = 60;
+							board_size = board_edge*board_edge;
+							covered_fields = board_size;
+							board = new int[board_size];
+						} else if (key == "blank_hit"){
+							blank_hit= std::stoi(value);
+						} else if (key == "blank_flag"){
+							blank_flag= std::stoi(value);
+						} else if (key == "bomb_hit"){
+							bomb_hit= std::stoi(value);
+						} else if (key == "bomb_flag"){
+							bomb_flag= std::stoi(value);
+						} else if (key == "blank_empty"){
+							blank_empty= std::stoi(value);
+						} else if (key == "waiting_timeout"){
+							waiting_timeout= std::stoi(value);
+							if(waiting_timeout < 0) waiting_timeout = 5;
+						} else if (key == "game_timeout"){
+							game_timeout= std::stoi(value);
+							if(game_timeout < 0) game_timeout = 300;
+						} else if (key == "restart_timeout"){
+							restart_timeout= std::stoi(value);
+							if(restart_timeout < 0) restart_timeout = 3;
+
+						} else {
+							std::cout << "Unknown configuration key" << key << std::endl;
+						}
+					} catch(const std::invalid_argument& e){
+						std::cerr << "Invalid config argument: " << e.what() <<std::endl;
+					} catch (const std::exception& e) {
+						std::cerr << "Config error: " << e.what() <<std::endl;
+					}
+
+				}
+			}
+		}
+
+	} else{
+		std::cout << "Could not open the configuration file\n";
+		return false;
+	}
+
+	return true;
+}
+
+
+
+
 int main()
 {
 	std::cout << "MinerServer on\n";
-
-
+	srand(time(0));
+	
+	loadConfig();
 	if (!StartServer())
 	{
-		std::cout << "Unable to start server\r\n";
+		std::cout << "Unable to start server" <<std::endl;
 		return -1;
 	}
 
-	auto prevMillis = std::chrono::steady_clock::now();
+	auto currentMillis = std::chrono::steady_clock::now();
+	auto prevMillisSec = currentMillis;
+
 	while (1) {
+		if(!PollSockets()) return -1;
 
-		PollSockets();
-
-		auto currentMillis = std::chrono::steady_clock::now();
-		auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(currentMillis - prevMillis);
-		if (elapsed.count() > TICK_INTERVAL)
+		currentMillis = std::chrono::steady_clock::now();
+		auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(currentMillis - prevMillisSec);
+		pollTimeout = ((1000 - elapsed.count()) < 200) ? (1000 - elapsed.count()) : 200;
+		if (elapsed.count() >= 1000)
 		{
-			OneTickTimer();
-			frameCnt--;
-			if (frameCnt < 0) {
-				OneSecondTimer();
-				frameCnt = TICKS_PER_SECOND;
-			}
-			prevMillis = currentMillis;
+			OneSecondTimer();
+			prevMillisSec += std::chrono::milliseconds(1000)*(elapsed.count()/1000);
 		}
+		
+		OneTickTimer();
 
 	}
 	close(LSock);
+	delete[] board;
+
+	return 0;
 }
 
